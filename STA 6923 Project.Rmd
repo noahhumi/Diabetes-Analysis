@@ -1,0 +1,342 @@
+---
+title: "STA 6923 Project"
+author: "Reverny Hsu, Noah Miller, Alexandra Perez"
+---
+
+# filter some predictors and randomly split training and test data 
+
+```{r}
+diab_data <- read.csv("C:/Users/noahm/OneDrive/Documents/R/STA 6923/Project/diabetes.csv")
+```
+
+```{r}
+library(dplyr)
+diab_data <- diab_data %>% filter(BMI > 0)
+diab_data <- diab_data %>% filter(SkinThickness > 0)
+diab_data <- diab_data %>% filter(BloodPressure > 0)
+diab_data <- diab_data %>% filter(Glucose > 0)
+```
+
+We Remove BMI=0, since BMI of 0 would mean a person has no weight, which is not physically possible. Also, 
+We Remove SkinThickness=0, since it's not possible people has no skin thickness. Next, We Remove BloodPressure=0, since it's not possible living people has no blood pressure. In addition, We Remove Glucose=0, since it's not possible people has no Glucose level.
+
+```{r}
+outcome_counts <- table(diab_data$Outcome)
+outcome_counts
+```
+
+This indicates that the dataset is imbalanced.
+
+```{r}
+library(caret)
+set.seed(1)
+trainIndex <- createDataPartition(diab_data$Outcome, p = 0.7, list = FALSE)
+train <- diab_data[trainIndex, ]
+test <- diab_data[-trainIndex, ]
+```
+
+# This performs a logistic regression on the predictors using Outcome as the response value.
+
+```{r}
+logDiab <- glm(Outcome ~ ., data = train, family = binomial)
+summary(logDiab)
+```
+
+The model shows that Pregnancies, Glucose, BMI and DiabetesPedigreeFunction are all statistically significant predictors in the dataset.
+
+# This fits the logistic regression model and computes the confusion matrix
+
+```{r}
+# Predict probabilities on the test set
+log_preds <- predict(logDiab, test, type = "response")
+
+# Convert probabilities to class predictions (threshold = 0.5)
+log_class <- ifelse(log_preds > 0.5, 1, 0)
+
+# Create a Confusion Matrix
+conf_matrix <- table(Predicted = log_class, Actual = test$Outcome)
+print(conf_matrix)
+mean(log_class == test$Outcome)
+```
+
+The confusion matrix reports a 77.36% accuracy rate for logistic regression.
+
+***Logistic regression model with significant predictors***
+
+```{r}
+log_Diab <- glm(Outcome ~ Pregnancies + Glucose + BMI + DiabetesPedigreeFunction, data = train, family = binomial)
+summary(log_Diab)
+```
+
+```{r}
+# Predict probabilities on the test set
+log_preds <- predict(log_Diab, test, type = "response")
+
+# Convert probabilities to class predictions (threshold = 0.5)
+log_class <- ifelse(log_preds > 0.5, 1, 0)
+
+# Create a Confusion Matrix
+conf_matrix <- table(Predicted = log_class, Actual = test$Outcome)
+print(conf_matrix)
+mean(log_class == test$Outcome)
+```
+
+With just the statistically significant predictors, the accuracy rate is slightly higher at 78.62%.
+
+# This computes the confusion matrix using LDA.
+
+```{r}
+library(MASS)
+# Fit LDA model with selected predictors
+diab_lda <- lda(Outcome ~ Pregnancies + Glucose + BMI + DiabetesPedigreeFunction, data = train)
+diab_lda_pred <- predict(diab_lda, test)
+table(diab_lda_pred$class, test$Outcome)
+mean(diab_lda_pred$class == test$Outcome)
+```
+
+With LDA, the accuracy rate is 76.73%
+
+# This computes the confusion matrix using QDA.
+
+```{r}
+diab_qda <- qda(Outcome ~ Pregnancies + Glucose + BMI + DiabetesPedigreeFunction, data = train)
+diab_qda_pred <- predict(diab_qda, test)
+table(diab_qda_pred$class, test$Outcome)
+mean(diab_qda_pred$class == test$Outcome)
+```
+
+QDA has a higher accuracy rate than LDA with 79.25% accuracy.
+
+# This computes the confusion matrix using KNN with K = 10.
+
+```{r}
+library(class)
+
+# Normalize the predictors (min-max scaling)
+normalize <- function(x) {
+  (x - min(x)) / (max(x) - min(x))
+}
+
+# Normalize predictors in train and test sets
+train_norm <- as.data.frame(lapply(train[, -ncol(train)], normalize))
+test_norm <- as.data.frame(lapply(test[, -ncol(test)], normalize))
+
+# Preserve the Outcome column separately
+train_outcome <- train$Outcome
+test_outcome <- test$Outcome
+
+# Build KNN Model (k = 10)
+set.seed(1) 
+knn_preds <- knn(train = train_norm, 
+                 test = test_norm, 
+                 cl = train_outcome, 
+                 k = 10)
+# Convert predictions and actual values to factors with the same levels
+knn_preds <- factor(knn_preds, levels = c("0", "1"))
+test_outcome <- factor(test_outcome, levels = c("0", "1"))
+
+# Evaluate Model Performance
+conf_matrix <- confusionMatrix(knn_preds, test_outcome)
+print(conf_matrix)
+mean(knn_preds == test_outcome)
+```
+
+With k=10, the accuracy rate is at 77.99%. k is set to this value so that the test doesn't overfit the data.
+
+# This computes the confusion matrix using naive Bayes.
+
+```{r}
+library(e1071)
+diab_bayes <- naiveBayes(Outcome ~ Pregnancies + Glucose + BloodPressure + BMI + DiabetesPedigreeFunction, data = train)
+diabnb_class <- predict(diab_bayes, test)
+table(diabnb_class, test$Outcome)
+mean(diabnb_class == test$Outcome)
+```
+
+Naive Bayes appears to have the highest accuracy rate compared to the other tests with a rate at 81.13%.
+
+# Subset Selection
+```{r}
+library(leaps)
+reg_diab <- regsubsets(Outcome ~ ., data = diab_data)
+reg_sum_diab <- summary(reg_diab)
+par(mfrow=c(2,2))
+
+plot(reg_sum_diab$rss ,xlab="Number of Variables ",ylab="RSS",type="l")
+index = which.min(reg_sum_diab$rss)
+points(index,reg_sum_diab$rss[index], col="red",cex=2,pch=20)
+
+plot(reg_sum_diab$cp ,xlab="Number of Variables ",ylab="Cp", type='l')
+index = which.min(reg_sum_diab$cp)
+points(index,reg_sum_diab$cp[index],col="red",cex=2,pch=20)
+
+plot(reg_sum_diab$bic ,xlab="Number of Variables ",ylab="BIC",type='l')
+index = which.min(reg_sum_diab$bic)
+points(index,reg_sum_diab$bic[index],col="red",cex=2,pch=20)
+
+plot(reg_sum_diab$adjr2 ,xlab="Number of Variables ", ylab="Adjusted RSq",type="l")
+index = which.max(reg_sum_diab$adjr2)
+points(index,reg_sum_diab$adjr2[index], col="red",cex=2,pch=20)
+```
+# RSS includes all 8 predictors
+```{r}
+coef(reg_diab, 8)
+```
+# Cp and Adjusted R^2 both contain 5 predictors
+```{r}
+coef(reg_diab, 5)
+```
+# BIC contains just 4 predictors
+```{r}
+coef(reg_diab, 4)
+```
+
+# Lasso
+```{r}
+library(glmnet)
+diab.ind <- sample(nrow(diab_data), 0.7*nrow(diab_data))
+set.seed(1)
+x.diab <- model.matrix(Outcome ~ ., diab_data)[,-1]
+y.diab <- diab_data$Outcome
+
+lasso.diab <- glmnet(x.diab[diab.ind,], y.diab[diab.ind], alpha = 1)
+cv.lasso.diab <- cv.glmnet(x.diab[diab.ind,], y.diab[diab.ind], alpha = 1)
+plot(cv.lasso.diab)
+```
+```{r}
+coef.min = coef(cv.lasso.diab, s = cv.lasso.diab$lambda.min)
+names(coef.min[,1][coef.min[,1]!=0])[-1]
+coef.min
+```
+```{r}
+lasso.diab.pred <- predict(lasso.diab, s = cv.lasso.diab$lambda.min, x.diab[-diab.ind,])
+mean((lasso.diab.pred-y.diab[-diab.ind])^2)
+```
+
+# Ridge Regression
+```{r}
+set.seed(1)
+cv.ridge.diab = cv.glmnet(x.diab[diab.ind,], y.diab[diab.ind], alpha = 0)
+plot(cv.ridge.diab, xlab = expression(paste("log", lambda)))
+```
+```{r}
+ridge.min.diab = coef(cv.ridge.diab, s = cv.ridge.diab$lambda.min)
+names(ridge.min.diab[,1][ridge.min.diab[,1]!=0])[-1]
+ridge.min.diab
+```
+```{r}
+ridge.diab.pred <- predict(cv.ridge.diab, s=cv.ridge.diab$lambda.min, x.diab[-diab.ind,])
+mean((ridge.diab.pred-y.diab[-diab.ind])^2)
+```
+
+# Elastic Net
+```{r}
+set.seed(1)
+cv.enet.diab = cv.glmnet(x.diab[diab.ind,], y.diab[diab.ind], alpha = 0.5)
+plot(cv.enet.diab, xlab = expression(paste("log", lambda)))
+```
+```{r}
+enet.min.diab = coef(cv.enet.diab, s = cv.enet.diab$lambda.min)
+names(enet.min.diab[,1][enet.min.diab[,1]!=0])[-1]
+enet.min.diab
+```
+```{r}
+enet.diab.pred <- predict(cv.enet.diab, s=cv.enet.diab$lambda.min, x.diab[-diab.ind,])
+mean((enet.diab.pred-y.diab[-diab.ind])^2)
+```
+
+# PCA Regression
+```{r}
+library(pls)
+set.seed(1)
+pcr.diab = pcr(Outcome ~ ., data = diab_data[diab.ind,], scale = T, validation = "CV")
+summary(pcr.diab)
+```
+```{r}
+validationplot(pcr.diab, val.type = "MSEP")
+```
+```{r}
+pca.min.diab = coef(pcr.diab, s = pcr.diab$coefficients)
+pca.min.diab
+```
+```{r}
+pcr.diab.pred <- predict(pcr.diab, x.diab[-diab.ind,], ncomp=pcr.diab$ncomp)
+mean((pcr.diab.pred-y.diab[-diab.ind])^2)
+```
+
+After comparing the regression methods, elastic net has the lowest mean squared error, which makes elastic net the best metod to use out of the different methods.
+
+```{r}
+library(pROC)
+#roc for log regression
+roc_curve_ALL <- roc(test$Outcome, log_preds)
+auc_value_ALL <- auc(roc_curve_ALL)
+print(paste("AUC:", round(auc_value_ALL, 3)))
+plot(roc_curve_ALL, main = paste("ROC Curve (AUC =", round(auc_value_ALL, 3), ")"))
+
+#roc for log regressoin with significant predictors
+roc_curve_SIG <- roc(test$Outcome, log_preds)
+auc_value_SIG <- auc(roc_curve_SIG)
+print(paste("AUC:", round(auc_value_SIG, 3)))
+plot(roc_curve_SIG, main = paste("ROC Curve (AUC =", round(auc_value_SIG, 3), ")"))
+
+#roc curve for lda
+diab_lda_probs <- diab_lda_pred$posterior[, 2]
+roc_curve_LDA <- roc(test$Outcome, diab_lda_probs)
+auc_value_LDA <- auc(roc_curve_LDA) 
+print(paste("AUC:", round(auc_value_LDA, 3)))
+plot(roc_curve_LDA, main = paste("ROC Curve for LDA (AUC =", round(auc_value_LDA, 3), ")"))
+
+#qda roc
+qda_probs <- diab_qda_pred$posterior[, 2] 
+roc_curve_QDA <- roc(test$Outcome, qda_probs)  
+auc_value_QDA <- auc(roc_curve_QDA) 
+print(paste("AUC:", round(auc_value_QDA, 3)))
+plot(roc_curve_QDA, main = paste("ROC Curve for QDA (AUC =", round(auc_value_QDA, 3), ")"))
+
+#knn roc
+set.seed(1)
+knn_preds <- knn(
+  train = train_norm, 
+  test = test_norm, 
+  cl = train_outcome, 
+  k = 10, 
+  prob = TRUE
+)
+knn_probs <- ifelse(knn_preds == "1", attr(knn_preds, "prob"), 1 - attr(knn_preds, "prob"))
+roc_curve_KNN <- roc(test_outcome, knn_probs)
+auc_value_KNN <- auc(roc_curve_KNN)           
+print(paste("AUC:", round(auc_value_KNN, 3)))
+plot(roc_curve_KNN, main = paste("ROC Curve for KNN (AUC =", round(auc_value_KNN, 3), ")"))
+
+#naive bayes roc
+library(e1071)
+diab_bayes <- naiveBayes(Outcome ~ Pregnancies + Glucose  + BMI  + DiabetesPedigreeFunction + BloodPressure, data = train)
+diabnb_class <- predict(diab_bayes, test)
+table(diabnb_class, test$Outcome)
+mean(diabnb_class == test$Outcome)
+diabnb_probs <- predict(diab_bayes, test, type = "raw") 
+diabnb_probs_1 <- diabnb_probs[, 2]
+roc_curve_NB <- roc(test$Outcome, diabnb_probs_1)  # Actual outcomes vs. predicted probabilities
+auc_value_NB <- auc(roc_curve_NB)  # Calculate AUC
+print(paste("AUC:", round(auc_value_NB, 3)))
+plot(roc_curve_NB, main = paste("ROC Curve for Naive Bayes (AUC =", round(auc_value_NB, 3), ")"))
+
+
+plot(roc_curve_SIG, col = "green", main = "ROC Curves for Different Models", 
+     xlab = "False Positive Rate", ylab = "True Positive Rate", lwd = 2)
+plot(roc_curve_QDA, col = "orange", add = TRUE, lwd = 2)
+plot(roc_curve_KNN, col = "pink", add = TRUE, lwd = 2)
+plot(roc_curve_LDA, col = "purple", add = TRUE, lwd = 2)
+plot(roc_curve_NB, col = "red", add = TRUE, lwd = 2)
+plot(roc_curve_ALL, col= "blue", add=TRUE, lwd=2)
+
+legend("bottomright", legend = c(paste("Logistic Regression (All):", round(auc_value_ALL, 4)),
+                                 paste("Logistic Regression (Significant):", round(auc_value_SIG, 4)),
+                                 paste("QDA:", round(auc_value_QDA, 4)),
+                                 paste("KNN:", round(auc_value_KNN, 4)),
+                                 paste("LDA:", round(auc_value_LDA, 4)),
+                                 paste("Naive Bayes:", round(auc_value_NB, 4))),
+       col = c("blue", "green", "orange", "pink", "purple", "red"), lwd = 2)
+```
+
