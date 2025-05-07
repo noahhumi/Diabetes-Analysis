@@ -1,0 +1,480 @@
+---
+title: "Diabetes Multivariate Analysis"
+author: "Angelica Garcia, Paola Guzman, Noah Miller (Group 2)"
+date: "2024-12-13"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Data Introduction
+
+## Set Up
+
+```{r, message=FALSE}
+library(readr)
+library(dplyr)
+library(corrplot)
+library(MASS)
+library(caret)
+library(ggplot2)
+library(reshape2)
+library(pheatmap)
+library(ggExtra)
+library(plyr)
+```
+
+```{r, message=FALSE}
+# read in data
+data <- read_csv("/Users/angelicagarcia/Desktop/diabetes_dataset.csv")
+# 1 = diabetes & 0 = no diabetes
+```
+
+```{r, message=FALSE}
+# data cleaning 
+data <- data %>% filter(BMI > 0)
+data <- data %>% filter(SkinThickness > 0)
+data <- data %>% filter(BloodPressure > 0)
+data <- data %>% filter(Glucose > 0)
+
+as.data.frame(table(data$Outcome))
+```
+
+\newpage
+
+# Part I: Correlations, Hypothesis Tests, Box's Test, Confidence Intervals, & Principal Components Analysis
+
+## Correlation Matrix
+
+```{r}
+corrplot(cor(data), method = "square", addCoef.col = 'black')
+```
+
+## Hypothesis Testing: Glucose vs BMI
+
+```{r}
+X = data[,c(2,6)]
+n1 = length(which(data$Outcome == 1))
+n2 = length(which(data$Outcome == 0))
+N = n1 + n2
+g = 2
+p = 2
+alpha = 0.05
+group.sample.sizes <- c(n1,n2)
+```
+
+## Box's Test: Glucose vs BMI
+
+```{r}
+"Box_M" <- function(x,nv){
+# The x is the data vector with the first n1 rows belonging to population 1
+#  the (n1+1):n2 rows belonging to population 2, etc.
+# nv = (n1,n2,...,ng)'
+# The number of groups is the length of nv-vector.
+# Box's M-test for equal covariance matrics
+# Written by Ruey S. Tsay on April 18, 2008
+Box.M=NULL
+g=length(nv)
+p=dim(x)[2]
+S=array(0,dim=c(p,p,g))
+Sp=matrix(0,p,p)
+n=sum(nv)
+deg2=n-g
+M = 0
+# tmp1 is the sum[(n_i-1)*ln(det(S_i))
+# u1 is the sum[1/(n_i-1)]
+tmp1=0
+u1 = 0
+idx=0
+for (i in 1:g){
+da=x[(idx+1):(idx+nv[i]),]
+smtx=cov(da)
+S[,,i]=smtx
+Sp=(nv[i]-1)*smtx+Sp
+tmp1=(nv[i]-1)*log(det(smtx))+tmp1
+u1 = u1 + 1.0/(nv[i]-1)
+#print("determinant")
+#print(det(smtx))
+idx=idx+nv[i]
+}
+Sp=Sp/deg2
+M=deg2*log(det(Sp))-tmp1
+u = (u1-(1.0/deg2))*(2*p^2+3*p-1)/(6*(p+1)*(g-1))
+C = (1-u)*M
+nu=p*(p+1)*(g-1)/2
+pvalue=1-pchisq(C,nu)
+Box.M=cbind(Box.M,c(C,pvalue))
+row.names(Box.M)=c("Box.M-C","p.value")
+cat("Test result:","\n")
+print(Box.M)
+Box_M <-list(Box.M=M, Test.Stat=C,p.value=pvalue)
+}
+```
+
+```{r}
+Box_M(X, group.sample.sizes)
+```
+The p-value is 0.3155723 > 0.05
+$H_0: \Sigma_1 = \Sigma_2$ is not rejected as the variances of glucose and BMI are similar.
+
+
+## Bonferroni's Confidence Intervals: Glucose vs BMI
+
+```{r}
+dia_data.manova <- manova(cbind(data$Glucose,data$BMI)~as.factor(data$Outcome))
+W = summary(dia_data.manova)$SS$Residuals
+for (i in 1:p) {
+  
+  pair.mean.diffs <- cbind( t(combn(g,2)),combn(tapply(data[,i],data$Outcome,mean),2,FUN=diff) )
+  
+  t.val <- qt(1-alpha/(p*g*(g-1)), df=N-g)
+  t <- abs(pair.mean.diffs[,3]/sqrt((diag(W)[i]/(N-g))*(1/group.sample.sizes[pair.mean.diffs[,1]] + 1/group.sample.sizes[pair.mean.diffs[,2]])))
+  CI.L <- pair.mean.diffs[,3] - t.val*sqrt((diag(W)[i]/(N-g))*(1/group.sample.sizes[pair.mean.diffs[,1]] + 1/group.sample.sizes[pair.mean.diffs[,2]]) )
+  CI.U <- pair.mean.diffs[,3] + t.val*sqrt((diag(W)[i]/(N-g))*(1/group.sample.sizes[pair.mean.diffs[,1]] + 1/group.sample.sizes[pair.mean.diffs[,2]]) )
+  
+  my.table.mat<-cbind(pair.mean.diffs, round(CI.L,3), round(CI.U,3), t, t.val, rep(i,times=nrow(pair.mean.diffs)) )
+  my.table<-as.data.frame(my.table.mat)
+  names(my.table)=c('grp1','grp2','diff.samp.means','lower.CI','upper.CI','t','t-val','variable'); print(my.table)
+}
+```
+
+Since zero is included in the confidence interval for glucose, that means the mean components between those diagnosed with diabetes and those not diagnosed with diabetes does not differ greatly. It is not included in the confidence interval for BMI, which means the mean components do differ significantly.
+
+## Hypothesis Testing: All Variables
+```{r}
+X = data[,-9]
+n1 = length(which(data$Outcome == 1))
+n2 = length(which(data$Outcome == 0))
+N = n1 + n2
+g = 2
+p = 8
+alpha = 0.05
+group.sample.sizes <- c(n1,n2)
+```
+
+## Box's Test: All Variables
+```{r}
+Box_M(X, group.sample.sizes)
+```
+The p-value is 0.01688272 < 0.05, so H0: all $\Sigma$ are equal is rejected as at least one of the variances is unequal to the rest.
+
+## Bonferroni's Confidence Intervals: All Variables
+
+```{r, warning=FALSE}
+dia_data.manova <- manova(cbind(data$Pregnancies, data$Glucose, data$BloodPressure, data$SkinThickness, data$Insulin, data$BMI, data$DiabetesPedigreeFunction, data$Age)~as.factor(data$Outcome))
+W = summary(dia_data.manova)$SS$Residuals
+for (i in 1:p) {
+  pair.mean.diffs <- cbind( t(combn(g,2)),combn(tapply(data[,i],data$Outcome,mean),2,FUN=diff) )
+  t.val <- qt(1-alpha/(p*g*(g-1)), df=N-g)
+  t <- abs(pair.mean.diffs[,3]/sqrt((diag(W)[i]/(N-g))*(1/group.sample.sizes[pair.mean.diffs[,1]] + 
+                                                          1/group.sample.sizes[pair.mean.diffs[,2]])))
+  CI.L <- pair.mean.diffs[,3] - t.val*sqrt((diag(W)[i]/(N-g))*(1/group.sample.sizes[pair.mean.diffs[,1]] + 
+                                                                 1/group.sample.sizes[pair.mean.diffs[,2]]) )
+  CI.U <- pair.mean.diffs[,3] + t.val*sqrt((diag(W)[i]/(N-g))*(1/group.sample.sizes[pair.mean.diffs[,1]] + 
+                                                                 1/group.sample.sizes[pair.mean.diffs[,2]]) )
+  my.table.mat<-cbind(pair.mean.diffs, round(CI.L,3), round(CI.U,3), t, t.val, rep(i,times=nrow(pair.mean.diffs)))
+  my.table<-as.data.frame(my.table.mat)
+  names(my.table)=c('grp1','grp2','diff.samp.means','lower.CI','upper.CI','t','t-val','variable'); print(my.table)
+}
+```
+None of the columns include zero, which means the mean components between the 2 groups differ greatly for each of the columns.
+
+## Principal Component Analysis
+
+```{r}
+# Standardize Variables
+diabetes.pca.st <- prcomp(data, scale = TRUE)
+diabetes.pca.st$sdev^2
+# Principal Components of Standardized Variables
+diabetes.pca.st$rotation
+```
+
+Since there are 3 eigenvalues greater than 1, only the first 3 principal components need to be retained.
+
+```{r}
+summary(diabetes.pca.st)
+```
+
+```{r}
+# Scree Plot
+screeplot(diabetes.pca.st, type="l")
+```
+
+The scree plot has a bend at 2, but it also has another bend at 4, which goes along with the PCA test.
+
+\newpage
+
+# Part II: QDA
+
+## Quadratic Discriminant Analysis
+
+Quadratic Discriminant Analysis (QDA) is a classifier with a quadratic decision boundary where the mean and covariance matrices of the response classes (Outcome = 0 for no diabetes; Outcome = 1 for diabetes) are not equal. Additionally, QDA assumes that the measurements for each class are normally distributed. Prior probabilities (of the response classes) show 67.5% of patients reported as not having diabetes and 32.5% as having diabetes (after data cleaning).
+
+Initially, Linear Discriminant Analysis was considered, but after performing Box's Test of Equal Variance, we confirmed that the covariance matrices of the response classes were unequal and proceeded with QDA. Box's Test resulted in a p-value of 0.0169; for $p<\alpha=0.05$ we reject $H_0:\Sigma_1=\Sigma_2$ and conclude that the diabetes and non-diabetes groups have different covariance matrices. 
+
+### Test of Equal Covariance
+
+```{r}
+X1 = data[data$Outcome==0, 1:8] #0= no diabetes; 355 observations (500 originally)
+X2 = data[data$Outcome==1, 1:8] #1=yes diabetes; 177 observations (268 originally)
+X1.mean = colMeans(X1)
+X2.mean = colMeans(X2)
+S1 = cov(X1)
+S2 = cov(X2)
+```
+
+```{r}
+# test of equal covariance matrices for diabetes vs. non-diabetes
+Box_M(data[ ,-9], c(177, 355))
+```
+
+Since $p<\alpha=0.05$ we reject $H_0:\Sigma_1=\Sigma_2$ and conclude that diabetes and non-diabetes groups have different covariance matrices. 
+
+### Split Data
+
+```{r}
+set.seed(123456)
+tr.size = floor(0.7*nrow(data))
+tr.ind = sample(seq_len(nrow(data)),tr.size) 
+
+# training data
+train = data[tr.ind,] 
+
+# testing data
+test = data[!(rownames(data) %in% tr.ind),] 
+```
+
+## QDA All Variables 
+
+### QDA All Variables (Training)
+
+```{r}
+# perform QDA on training data set
+qda.model = qda(Outcome ~ ., data = train)
+qda.model
+```
+
+```{r}
+# model accuracy for training data & confusion matrix
+qda.pred.tr = predict(qda.model, train, type="response")
+table(qda.pred.tr$class, train$Outcome)
+
+# fraction of correct predictions for training data set
+mean(qda.pred.tr$class == train$Outcome) 
+```
+
+After splitting the data into 70% training data and 30% testing data, QDA was implemented on all variables which resulted in 77.15% correct predictions for the training data. 
+
+### QDA All Variables (Test)
+
+When evaluating the accuracy of the QDA model, we see that the confusion matrix for the testing data showed an accuracy of 0.7938 (e.g. about 79.4% of the observations were correctly predicted). Sensitivity resulted in 57.1%:
+
+$$\frac{\text{correctly classified diabetic patients}}{\text{correctly classified diabetic patients}+\text{patients who were incorrectly predicted as non-diabetic}}=\frac{32}{32+24}=0.5714$$
+On the other hand, Specificity was 91.35%:
+
+$$\frac{\text{correctly classified non-diabetics}}{\text{correctly classified non-diabetics}+\text{patients who were misclassified as diabetic}}=\frac{95}{95+9}=0.9135$$
+
+```{r}
+# model accuracy for test data
+qda.pred.te = predict(qda.model, newdata=test, type="response")
+#table(qda.pred.te$class, test$Outcome)
+
+# fraction of correct predictions for test data set
+#mean(qda.pred.te$class == test$Outcome) 
+
+# a more detailed evaluation of testing data
+confusionMatrix(as.factor(qda.pred.te$class),as.factor(test$Outcome), positive = "1")
+```
+
+```{r}
+point_colors <- ifelse(test$Outcome == 0, 3L, 10L)
+plot(qda.pred.te$posterior[,2], qda.pred.te$class, col=point_colors, main="QDA Model Classification")
+```
+
+## QDA Transformed Model
+
+Due to the lack of normality on some variables, it is suggested to log transform the variables Pregnancies, Insulin, DiabetesPedigreeFunction, and Age. Variables with a possible observed value of 0 (such as Pregnancies and Insulin) have a constant of 1 added before the taking the log to avoid undefined values. For the transformed model we observe a training accuracy of 0.7849 and a testing accuracy of 0.7625; not necessarily improving the previous model.
+
+```{r}
+qda.modelT = qda(Outcome ~ log(Pregnancies+1)+Glucose+BloodPressure+SkinThickness+log(Insulin+1)+BMI+log(DiabetesPedigreeFunction)+log(Age), data = train)
+
+# model accuracy for training data
+qda.pred.trT = predict(qda.modelT, train, type="response")
+# fraction of correct predictions for training data set
+mean(qda.pred.trT$class == train$Outcome) 
+
+# model accuracy for test data
+qda.pred.teT = predict(qda.modelT, newdata=test, type="response")
+mean(qda.pred.teT$class == test$Outcome) 
+# a more detailed evaluation of testing data
+confusionMatrix(as.factor(qda.pred.teT$class),as.factor(test$Outcome), positive = "1")
+```
+
+## QDA Reduced Model 
+
+In this section we explore a reduced model (Glucose and Pregnancies to predict Outcome) and a visual representation of a two-dimensional decision plot and notice a testing accuracy of 0.7937 which is almost exactly the same to the original model, and Specificity slightly increasing to 0.9423. The plot demonstrates the quadratic decision boundary (the black curve that separates the two classes) where the green-shaded area represents what the model predicts as non-diabetic observations and the red-shaded area represents diabetic predictions. The green triangles show non-diabetic observations and the red plus "+" symbol shows diabetic observations. A case of misclassified observations, for example, can be shown as the green triangles appearing in the red-shaded area representing truly non-diabetic observations in which the model incorrectly predicted as diabetic. 
+
+```{r}
+# perform QDA on reduced model
+qda.model00 = qda(Outcome ~ Glucose + Pregnancies, data = train)
+
+# model accuracy for train
+qda.pred = predict(qda.model00, train, type="response")
+#table(qda.pred$class, train$Outcome)
+# fraction of correct predictions for train
+mean(qda.pred$class == train$Outcome) 
+
+# model accuracy for test data
+qda.pred.te = predict(qda.model00, newdata=test, type="response")
+#table(qda.pred.te$class, test$Outcome)
+# fraction of correct predictions for test data set
+#mean(qda.pred.te$class == test$Outcome) 
+confusionMatrix(as.factor(qda.pred.te$class),as.factor(test$Outcome), positive = "1")
+```
+
+```{r, echo=FALSE}
+data$Outcome <- as.factor(data$Outcome)
+data<- as.data.frame(data)
+
+train$Outcome <- as.factor(train$Outcome)
+train<- as.data.frame(train)
+
+test$Outcome <- as.factor(test$Outcome)
+test<- as.data.frame(test)
+```
+
+```{r}
+decisionplot <- function(model, data, class = NULL, predict_type = "class",
+  resolution = 100, showgrid = TRUE, ...) {
+
+  if(!is.null(class)) cl <- data[,class] else cl <- 1
+  data <- data[,1:2]
+  k <- length(unique(cl))
+
+  plot(data, col = ifelse(test$Outcome == 0, 3L, 10L), pch = as.integer(cl)+1L, ...)
+
+  # make grid
+  r <- sapply(data, range, na.rm = TRUE)
+  xs <- seq(r[1,1], r[2,1], length.out = resolution)
+  ys <- seq(r[1,2], r[2,2], length.out = resolution)
+  g <- cbind(rep(xs, each=resolution), rep(ys, time = resolution))
+  colnames(g) <- colnames(r)
+  g <- as.data.frame(g)
+  p <- predict(model, g, type = predict_type)
+  if(is.list(p)) p <- p$class
+  p <- as.factor(p)
+
+  if(showgrid) points(g, col = ifelse(p == 0, 3L, 10L), pch = ".")
+
+  z <- matrix(as.integer(p), nrow = resolution, byrow = TRUE)
+  contour(xs, ys, z, add = TRUE, drawlabels = FALSE,
+    lwd = 2, levels = (1:(k-1))+.5)
+
+  invisible(z)
+}
+```
+
+```{r}
+decisionplot(qda.model00, data=test, class = "Outcome")
+```
+
+## QDA Conclusion
+
+Since Model 1 and Model 3 performed similarily, it is suggested to opt for the reduced model (Model 3) in determining diabetes status; the fraction of correctly classified patients was the same between both models, Specificity was higher for Model 3, and a reduced model is simpler in interpretation. It is suggested to consider a more advanced supervised learning technique such as a Support Vector Machine (SVM) for future work, considering SVM’s do not necessarily assume normality of the data.  
+
+\newpage
+
+# Part III: Additional Data Exploration
+
+## Correlation Grouped By Outcome
+
+```{r, message=FALSE}
+# This resets the dataset so that it can be used in the following plots.
+data <- read_csv("/Users/angelicagarcia/Desktop/diabetes_dataset.csv")
+data <- data %>% filter(BMI > 0)
+data <- data %>% filter(SkinThickness > 0)
+data <- data %>% filter(BloodPressure > 0)
+data <- data %>% filter(Glucose > 0)
+```
+
+```{r}
+#GROUPING DATA by diabetic outcomes
+diabetic_data <- filter(data, Outcome == 1)
+nondiabetic_data <- filter(data, Outcome == 0)
+
+#BIVARIATE PLOT MATRIX
+data$Outcome <- factor(data$Outcome, levels = c(0, 1), labels = c("Non-Diabetic", "Diabetic"))
+
+par(mar = c(1, 1, 1, 1))
+pairs(data[1:8], #using columns 1-8 as the variable, excluding Outcome column
+      main = "Diabetic vs Non-Diabetic Data", #title of plot
+      pch = 24,
+      cex = 0.9,
+      bg = c("green", "red")[data$Outcome]) #differentiating colors
+      #distinguishing between diabetic and non-diabetic observations
+warnings()
+#CORRELATION MATRIX
+#data$Outcome <- as.numeric(as.character(data$Outcome))
+cor_matrix <- cor(data[, c(1:8)], use = "complete.obs")
+print(cor_matrix)
+```
+
+## Overall Correlation
+
+```{r, warning=FALSE}
+corrplot(cor_matrix, 
+         method = "circle",
+         addCoef.col = "black", 
+         col = colorRampPalette(c("cyan", "yellow", "magenta"))(200), #colors for matrix
+         number.cex = 0.7,         
+         diag = FALSE,
+         digits = 2, #display two decimal digits
+         tl.srt = 45, #tilting upper text to fit better
+         tl.cex = 0.6, #text size to fit better
+         tl.col = "blue", #the color of variable text
+         mar = c(1, 1, 1, 1), #margins adjustment
+         main = "Correlation Matrix") #title of matrix
+```
+
+## Diabetes Only
+
+```{r, warning=FALSE}
+#creating correlation matrix for diabetic data set
+diabetic_cor_matrix <- cor(diabetic_data[, c(1:8)], use = "complete.obs")
+
+#creating correlation matrix for nondiabetic data set
+nondiabetic_cor_matrix <- cor(nondiabetic_data[, c("Pregnancies", "Glucose", "BloodPressure", 
+                                             "SkinThickness", "Insulin", "BMI",
+                                             "DiabetesPedigreeFunction", "Age"
+)], use = "complete.obs")
+
+
+# Density plot of 'glucose' by 'outcome' (diabetic vs nondiabetic)
+#change the x =, and title for the vairable we are looking for to save space
+#Density plots were used instead of histograms as they provided a better visual
+ggplot(diabetic_data, aes(x = Age, fill = Outcome)) +
+  geom_density(alpha = 1.0) +  # alpha makes the fill transparent
+  labs(title = "Density Plot of Age by Outcome", 
+       x = "Age", 
+       y = "Density") +
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", color = "white"),  # Set background to white
+    plot.background = element_rect(fill = "white"),  # Set overall plot background to white
+    panel.grid.major = element_line(color = "gray", size = 0.2),  # Optionally, customize grid lines
+    panel.grid.minor = element_line(color = "gray", size = 0.2)
+  )# Use a minimal theme
+
+ggsave("age2.png", width = 8, height = 6)
+
+#AGE: Most diabetics are older in age.
+#BP: Diabetics tend to have a higher blood pressure.
+#BMI: Surprisingly, diabetics BMI is lower than those that are nondiabetic - maybe because of the weight loss that may occur with diabetes.
+#GLUCOSE: Diabetics tend to have higher glucose levels 
+#INSULIN: Diabetics tend to have higher insulin levels.
+#PEDIGREE: Those that are diabetic due have family history with diabetes moreso than those that are non-diabetic.
+#PREGNANCIES: More pregnancies occur within diabetic patients
+#SKIN THICKNESS: Diabetic skin thickness tends to run more on the thicker side than those with no diabetes. 
+```
